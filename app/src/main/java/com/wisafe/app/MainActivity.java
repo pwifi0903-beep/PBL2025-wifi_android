@@ -70,12 +70,8 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // 로컬 서버 URL 로드 (Flask 서버가 실행 중이어야 함)
-        // 실제 배포 시에는 서버 URL로 변경
-        String serverUrl = "http://10.0.2.2:5000/user"; // 에뮬레이터용
-        // String serverUrl = "http://YOUR_SERVER_IP:5000/user"; // 실제 기기용
-        
-        webView.loadUrl(serverUrl);
+        // 로컬 HTML 파일 로드 (Flask 서버 불필요)
+        webView.loadUrl("file:///android_asset/index.html");
     }
 
     private void checkPermissions() {
@@ -164,6 +160,8 @@ public class MainActivity extends AppCompatActivity {
                                 jsonObject.put("ssid", network.ssid);
                                 jsonObject.put("protocol", network.protocol);
                                 jsonObject.put("security_level", network.securityLevel);
+                                jsonObject.put("signalStrength", network.signalStrength);
+                                jsonObject.put("bssid", network.bssid);
                                 jsonArray.put(jsonObject);
                             } catch (JSONException e) {
                                 e.printStackTrace();
@@ -212,6 +210,30 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public boolean hasPermissions() {
             return wifiScanHelper.hasPermissions();
+        }
+
+        /**
+         * 현재 연결된 WiFi 정보 반환
+         */
+        @JavascriptInterface
+        public String getCurrentWiFiInfo() {
+            WiFiScanHelper.WiFiNetwork network = wifiScanHelper.getCurrentConnection();
+            if (network == null) {
+                return null;
+            }
+
+            try {
+                JSONObject jsonObject = new JSONObject();
+                jsonObject.put("ssid", network.ssid);
+                jsonObject.put("protocol", network.protocol);
+                jsonObject.put("security_level", network.securityLevel);
+                jsonObject.put("signalStrength", network.signalStrength);
+                jsonObject.put("bssid", network.bssid);
+                return jsonObject.toString();
+            } catch (JSONException e) {
+                e.printStackTrace();
+                return null;
+            }
         }
     }
 }

@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.net.wifi.ScanResult;
+import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.util.Log;
@@ -18,6 +19,7 @@ import java.util.List;
 
 public class WiFiScanHelper {
     private static final String TAG = "WiFiScanHelper";
+    private static final int INVALID_RSSI = -127;
     private Context context;
     private WifiManager wifiManager;
     private ScanCallback scanCallback;
@@ -139,52 +141,120 @@ public class WiFiScanHelper {
         }
     }
 
+    public WiFiNetwork getCurrentConnection() {
+        if (!hasPermissions() || wifiManager == null) {
+            return null;
+        }
+
+        WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+        if (wifiInfo == null || wifiInfo.getNetworkId() == -1) {
+            return null;
+        }
+
+        String ssid = sanitizeSsid(wifiInfo.getSSID());
+        if (ssid == null || ssid.isEmpty()) {
+            return null;
+        }
+
+        String bssid = wifiInfo.getBSSID();
+        int rssi = wifiInfo.getRssi();
+        ScanResult matchedResult = findMatchingScanResult(ssid, bssid);
+
+        String protocol = matchedResult != null
+                ? getSecurityProtocol(matchedResult)
+                : "UNKNOWN";
+
+        if (rssi == INVALID_RSSI && matchedResult != null) {
+            rssi = matchedResult.level;
+        }
+
+        String securityLevel = getSecurityLevel(protocol);
+
+        return new WiFiNetwork(
+                ssid,
+                protocol,
+                securityLevel,
+                rssi,
+                bssid
+        );
+    }
+
+    private ScanResult findMatchingScanResult(String ssid, String bssid) {
+        try {
+            List<ScanResult> results = wifiManager.getScanResults();
+            if (results == null) {
+                return null;
+            }
+
+            for (ScanResult result : results) {
+                boolean ssidMatch = result.SSID != null && result.SSID.equals(ssid);
+                boolean bssidMatch = bssid != null && bssid.equals(result.BSSID);
+                if (ssidMatch || bssidMatch) {
+                    return result;
+                }
+            }
+        } catch (SecurityException e) {
+            Log.e(TAG, "Scan results unavailable", e);
+        }
+        return null;
+    }
+
+    private String sanitizeSsid(String ssid) {
+        if (ssid == null || ssid.equalsIgnoreCase("<unknown ssid>")) {
+            return null;
+        }
+        if (ssid.startsWith("\"") && ssid.endsWith("\"") && ssid.length() >= 2) {
+            return ssid.substring(1, ssid.length() - 1);
+        }
+        return ssid;
+    }
+
     private String getSecurityProtocol(ScanResult result) {
         String capabilities = result.capabilities;
-        
+
         if (capabilities == null || capabilities.isEmpty()) {
             return "OPEN";
         }
 
-        // WPA3 확인
-        if (capabilities.contains("WPA3")) {
+        String upperCapabilities = capabilities.toUpperCase();
+
+        if (upperCapabilities.contains("WPA3")) {
             return "WPA3";
         }
 
-        // WPA2 확인
-        if (capabilities.contains("WPA2")) {
-            if (capabilities.contains("WPS")) {
-                return "WPA2_WPS";
+        if (upperCapabilities.contains("WPA2")) {
+            boolean isEnterprise = upperCapabilities.contains("EAP") || upperCapabilities.contains("ENTERPRISE");
+            boolean isPersonal = upperCapabilities.contains("PSK") || upperCapabilities.contains("SAE");
+
+            if (isEnterprise && !isPersonal) {
+                return "WPA2-ENTERPRISE";
             }
-            return "WPA2";
+
+            return "WPA2-PERSONAL";
         }
 
-        // WPA 확인
-        if (capabilities.contains("WPA")) {
+        if (upperCapabilities.contains("WPA")) {
             return "WPA";
         }
 
-        // WEP 확인
-        if (capabilities.contains("WEP")) {
+        if (upperCapabilities.contains("WEP")) {
             return "WEP";
         }
 
-        // 암호화 없음
         return "OPEN";
     }
 
     private String getSecurityLevel(String protocol) {
-        switch (protocol.toUpperCase()) {
+        String normalized = protocol == null ? "" : protocol.toUpperCase();
+        switch (normalized) {
             case "OPEN":
                 return "critical";
             case "WEP":
                 return "danger";
             case "WPA":
                 return "warning";
-            case "WPA2":
-                return "safe";
-            case "WPA2_WPS":
-                return "danger";
+            case "WPA2-PERSONAL":
+            case "WPA2-ENTERPRISE":
             case "WPA3":
                 return "safe";
             default:
